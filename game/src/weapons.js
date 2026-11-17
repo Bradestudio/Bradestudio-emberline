@@ -135,9 +135,9 @@ export function tickWeapon(state, dt) {
   return false;
 }
 
-export function startReload(state) {
+export function startReload(state, reloadMult = 1) {
   if (state.reloading > 0 || state.mag >= state.def.magSize || state.reserve <= 0) return false;
-  state.reloading = state.def.reloadTime;
+  state.reloading = state.def.reloadTime * reloadMult;
   return true;
 }
 

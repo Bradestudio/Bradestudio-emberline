@@ -7,7 +7,7 @@ import { Match } from './game.js';
 import { input, bindInput, requestLock, releaseLock, wasPressed, endFrame } from './input.js';
 import { audio } from './audio.js';
 import { initHud, updateHud, showEndScreen, showMenu } from './hud.js';
-import { stageShot } from './shots.js';
+import { stageShot, autopilot } from './shots.js';
 import { runSelfTest } from './selftest.js';
 import { STEP, PLAYER } from './config.js';
 
@@ -15,6 +15,7 @@ const params = new URLSearchParams(window.location.search);
 const seed = Number(params.get('seed') || 7) || 7;
 const shotName = params.get('shot');
 const selftest = params.get('selftest') === '1';
+const soak = params.get('soak') === '1';
 
 const container = document.getElementById('game');
 const canvasHolder = container;
@@ -87,6 +88,10 @@ bindInput(canvas);
 window.addEventListener('error', (event) => {
   const el = document.getElementById('errors');
   if (el) el.textContent += `${event.message}\n`;
+});
+window.addEventListener('unhandledrejection', (event) => {
+  const el = document.getElementById('errors');
+  if (el) el.textContent += `unhandled rejection: ${event.reason}\n`;
 });
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -293,6 +298,75 @@ if (selftest) {
     }
   });
   renderer.render(scene, camera);
+} else if (soak) {
+  // Soak: a full autopilot match through the real frame path (fixed steps,
+  // HUD, camera, render) until victory, death, or a 240s sim cap. The verdict
+  // lands in the #selftest box and the page title, like the self-test.
+  const box = document.getElementById('selftest');
+  const errorsEl = document.getElementById('errors');
+  match.start();
+  overlay.hidden = true;
+  let simNow = 0;
+  let lastT = performance.now();
+  let frames = 0;
+  let accSoak = 0;
+  let done = false;
+  function finish() {
+    if (done) return;
+    done = true;
+    const errText = errorsEl ? errorsEl.textContent.trim() : '';
+    const p = match.player;
+    const result = {
+      pass: errText === '' && match.phase !== 'playing',
+      phase: match.phase,
+      time: Number(match.time.toFixed(1)),
+      kills: p ? p.kills : 0,
+      emberRank: p ? p.emberRank : 0,
+      frames,
+      errors: errText,
+      summary: `soak ${match.phase} at ${match.time.toFixed(1)}s, ${p ? p.kills : 0} kills, rank ${p ? p.emberRank : 0}, ${frames} frames, errors: ${errText === '' ? 'none' : errText}`,
+    };
+    document.title = result.pass ? 'SOAK PASS' : 'SOAK FAIL';
+    if (box) {
+      box.style.display = 'block';
+      box.textContent = JSON.stringify(result, null, 1);
+    }
+  }
+  (function soakFrame(now) {
+    if (done) return;
+    const dt = Math.min(0.25, (now - lastT) / 1000);
+    lastT = now;
+    frames += 1;
+    if (match.phase === 'playing') {
+      autopilot(match, true, simNow);
+      accSoak += dt;
+      let steps = 0;
+      while (accSoak >= STEP && steps < 12) {
+        match.update(STEP, simNow);
+        simNow += STEP;
+        accSoak -= STEP;
+        steps += 1;
+        // the autopilot's look delta is one frame's worth: consume it on the
+        // first step only, like the live loop consumes mouse look once
+        input.lookDX = 0;
+        input.lookDY = 0;
+        if (match.phase !== 'playing') break;
+      }
+      if (steps === 12) accSoak = 0;
+      match.updateCamera();
+      updateHud(match, match.time);
+      if (match.phase !== 'playing' || match.time >= 240) {
+        showEndScreen(match.phase === 'victory', match);
+        renderer.render(scene, camera);
+        endFrame();
+        finish();
+        return;
+      }
+    }
+    renderer.render(scene, camera);
+    endFrame();
+    requestAnimationFrame(soakFrame);
+  })(performance.now());
 } else if (shotName) {
   // Screenshot mode: stage once, render once, stay still — the capture takes
   // the staged frame, not a game that has run on past it.

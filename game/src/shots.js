@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { input } from './input.js';
 import { STEP } from './config.js';
+import { applyRankBonus } from './ranks.js';
 import { segmentBlocked } from './world.js';
 import { applyDamage } from './combat.js';
 
@@ -364,6 +365,10 @@ export function stageShot(name, match, camera, renderer) {
   const p = match.player;
   p.pos.set(0, 0, 18);
   p.yaw = Math.PI;
+  // the staged drifter already earned a rank in this match, so the shot shows
+  // the rank badge, the callsign nameplates and the kill feed at once
+  p.emberRank = 1;
+  applyRankBonus(p, 1);
   const rivals = match.fighters.filter((f) => !f.isPlayer && f.alive).slice(0, 2);
   if (rivals[0]) rivals[0].pos.set(-14, 0, 2);
   if (rivals[1]) rivals[1].pos.set(15, 0, 0);

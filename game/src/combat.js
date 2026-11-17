@@ -9,8 +9,9 @@ raycaster.far = 200;
 
 const BODY_COLORS = [0xff7a2f, 0xffd166, 0x7fb069, 0x9b5de5, 0xef476f, 0x06d6a0, 0x118ab2];
 
-/** Visible body for a bot: torso, head, legs, gun — all raycastable. */
-export function makeBotBody(scene, index) {
+/** Visible body for a bot: torso, head, legs, gun — all raycastable — plus a
+ * floating callsign nameplate (a cheap canvas sprite, not raycastable). */
+export function makeBotBody(scene, index, name = '') {
   const color = BODY_COLORS[index % BODY_COLORS.length];
   const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.15 });
@@ -34,11 +35,33 @@ export function makeBotBody(scene, index) {
   const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.78), dark);
   gun.position.set(0.3, 1.28, 0.3);
   group.add(torso, head, visor, legL, legR, gun);
+  // callsign nameplate: a small canvas sprite floating above the head,
+  // readable at range, one draw call per bot
+  let nameplate = null;
+  if (name) {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 64;
+    const g = c.getContext('2d');
+    g.font = 'bold 34px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.shadowColor = 'rgba(0,0,0,0.9)';
+    g.shadowBlur = 6;
+    g.fillStyle = '#ffd9a0';
+    g.fillText(name, 128, 32);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    nameplate = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+    nameplate.scale.set(1.9, 0.48, 1);
+    nameplate.position.y = 2.15;
+    group.add(nameplate);
+  }
   group.traverse((m) => {
     if (m.isMesh) m.userData.part = m === head ? 'head' : 'body';
   });
   scene.add(group);
-  return { group, color, parts: [torso, head, legL, legR, gun] };
+  return { group, color, parts: [torso, head, legL, legR, gun], nameplate };
 }
 
 /**

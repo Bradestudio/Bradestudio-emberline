@@ -42,8 +42,14 @@
 
   #damage-vignette { position: fixed; inset: 0; opacity: 0; transition: opacity 120ms linear; background: radial-gradient(ellipse at center, transparent 52%, rgba(255, 60, 40, .5) 100%); }
   #damage-vignette.on { opacity: 1; }
-  #zone-vignette { position: fixed; inset: 0; opacity: 0; transition: opacity 300ms linear; background: radial-gradient(ellipse at center, transparent 58%, rgba(255, 122, 47, .38) 100%); }
-  #zone-vignette.on { opacity: 1; }
+  #zone-vignette { position: fixed; inset: 0; opacity: 0; transition: opacity 300ms linear; background: radial-gradient(ellipse at center, transparent 58%, rgba(255, 60, 30, .55) 100%); }
+  #zone-vignette.on { opacity: 1; animation: zonepulse 1.1s ease-in-out infinite; }
+  @keyframes zonepulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+  #ember-rank { position: fixed; top: 62px; left: 50%; transform: translateX(-50%); font-family: var(--font-readout); font-size: 12px; letter-spacing: .08em; color: #ffb703; text-shadow: 0 1px 3px #000; }
+  #dmgnums { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .dmgnum { position: fixed; transform: translate(-50%, -50%); font-family: var(--font-readout); font-weight: 700; font-size: 15px; color: #ffd166; text-shadow: 0 1px 3px #000; }
+  .feed-line.note { color: #ffb703; border-color: #6b4a1a; }
 
   #topbar { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 16px; font-family: var(--font-readout); text-shadow: 0 1px 3px #000; }
   #alive { font-size: 15px; color: var(--muted); }
@@ -91,26 +97,32 @@
 
   .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(8, 12, 15, .88); }
   .overlay[hidden] { display: none; }
-  .panel { width: min(520px, 100%); padding: 34px; background: var(--surface); border: 1px solid var(--hairline); }
-  .panel h1 { margin: 0 0 8px; font-size: 40px; line-height: 1.05; font-weight: 800; letter-spacing: -0.02em; }
+  .panel { width: min(520px, 100%); padding: 22px 26px; background: var(--surface); border: 1px solid var(--hairline); }
+  .panel h1 { margin: 0 0 6px; font-size: 34px; line-height: 1.05; font-weight: 800; letter-spacing: -0.02em; }
   .panel h1 .ember { color: var(--ember); }
-  .panel p { margin: 0 0 22px; max-width: 52ch; font-size: 16px; line-height: 1.55; color: var(--muted); }
+  .panel p { margin: 0 0 14px; max-width: 52ch; font-size: 15px; line-height: 1.5; color: var(--muted); }
   .panel p b { color: var(--ink); }
   #play { font: inherit; font-weight: 700; font-size: 17px; padding: 13px 22px; border: 1px solid var(--ember); background: var(--ember); color: #160a04; cursor: pointer; }
   #play:hover { background: var(--ink); border-color: var(--ink); }
   #play:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
-  .quality { margin: 22px 0 0; }
+  .quality { margin: 14px 0 0; }
   .quality .label { font-size: 12px; color: var(--muted); letter-spacing: .12em; margin-bottom: 8px; }
   .quality .row { display: flex; gap: 8px; }
   .quality button { flex: 1; font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid var(--hairline); background: transparent; color: var(--ink); cursor: pointer; }
   .quality button:hover { border-color: var(--ember); }
   .quality button.active { border-color: var(--ember); color: var(--ember); }
   .quality .note { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
-  .keys { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; color: var(--muted); }
+  .keys { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
   .keys li { display: flex; align-items: center; gap: 8px; }
   .keys kbd { min-width: 24px; padding: 2px 6px; border: 1px solid var(--hairline); font-family: var(--font-readout); font-size: 12px; color: var(--ink); text-align: center; }
   #end-stats { font-family: var(--font-readout); font-size: 15px; color: var(--muted); margin: 0 0 22px; line-height: 1.7; }
   #end-stats b { color: var(--ink); }
+  .best-place { font-family: var(--font-readout); font-size: 13px; color: var(--ember); margin: 0 0 12px; }
+  .howto { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--hairline); background: rgba(255, 122, 47, .06); font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .howto b { color: var(--ink); }
+  .arsenal { margin: 0 0 12px; padding: 0; list-style: none; display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
+  .arsenal b { color: var(--ink); }
+  .arsenal span { color: var(--ember); font-family: var(--font-readout); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -121,6 +133,7 @@
   <div id="zone-vignette"></div>
   <div id="crosshair"><i></i><i></i><i></i><i></i><i></i></div>
   <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="dmgnums"></div>
 
   <canvas id="minimap" width="188" height="188"></canvas>
 
@@ -129,6 +142,7 @@
     <span id="zone-timer">0:20</span>
     <span id="zone-label">ZONE SHRINKS</span>
   </div>
+  <div id="ember-rank">EMBER RANK 0 · NEXT: MAX HP +15 · HEAL 15</div>
 
   <div id="killfeed"></div>
 
@@ -154,6 +168,14 @@
   <section class="panel" role="dialog" aria-modal="true" aria-labelledby="overlay-title">
     <h1 id="overlay-title">EMBERLINE</h1>
     <p id="overlay-copy">Eight drifters drop into the <b>Ashen Reach</b>. The ashfall closes in — loot fast, fight smart, be the <b>last drifter standing</b>. Click to play.</p>
+    <p id="best-place" class="best-place"></p>
+    <div class="howto"><b>How to play:</b> loot a real gun, hunt the seven rivals — <b>ASH, CINDER, SLAG, RUST, FLINT, SMOKE, EMBER</b> — and stay inside the circle. Every elimination and every zone phase you survive earns an <b>Ember rank</b> with a stacking bonus. Supply drops fall inside the zone: follow the light pillar. Last drifter standing wins.</div>
+    <ul class="arsenal">
+      <li><b>P8 Sidekick</b> — pistol, fast &amp; reliable <span>12 · LIGHT</span></li>
+      <li><b>VK-9 Tempest</b> — full-auto rifle <span>30 · LIGHT</span></li>
+      <li><b>BR-12 Breaker</b> — 8-pellet shotgun, close range <span>6 · SHELL</span></li>
+      <li><b>LW-7 Longeye</b> — marksman rifle, one-shot threat <span>5 · LONG</span></li>
+    </ul>
     <p id="end-stats" hidden></p>
     <button id="play" type="button">Click to play</button>
     <div class="quality">
@@ -167,7 +189,7 @@
     </div>
     <ul class="keys">
       <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move · <kbd>Shift</kbd> Sprint · <kbd>Space</kbd> Jump</li>
-      <li><kbd>Mouse</kbd> Look &amp; fire · right-click to aim down sights</li>
+      <li><kbd>Mouse</kbd> Look &amp; fire · right-click to aim down sights · <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> look without the mouse</li>
       <li><kbd>R</kbd> Reload · <kbd>1</kbd>–<kbd>4</kbd> Weapons · <kbd>E</kbd> Pick up</li>
       <li><kbd>M</kbd> Mute · <kbd>P</kbd> Pause · <kbd>Esc</kbd> Release mouse</li>
     </ul>

@@ -44,6 +44,33 @@ function groundTexture() {
     }
     g.stroke();
   }
+  // scorch marks: dark radial burns where the yard caught fire
+  for (let i = 0; i < 14; i += 1) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const r = 12 + Math.random() * 30;
+    const grad = g.createRadialGradient(x, y, 2, x, y, r);
+    grad.addColorStop(0, 'rgba(18,12,8,0.55)');
+    grad.addColorStop(1, 'rgba(18,12,8,0)');
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  // tire tracks: paired dark arcs from haulers crossing the yard
+  g.strokeStyle = 'rgba(30,24,18,0.4)';
+  g.lineWidth = 4;
+  for (let i = 0; i < 7; i += 1) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const r = 60 + Math.random() * 120;
+    const a0 = Math.random() * Math.PI * 2;
+    for (const off of [-4, 4]) {
+      g.beginPath();
+      g.arc(x, y, r + off, a0, a0 + 0.9 + Math.random() * 0.8);
+      g.stroke();
+    }
+  }
   // faded yard lines
   g.strokeStyle = 'rgba(255,190,90,0.35)';
   g.lineWidth = 5;
@@ -217,6 +244,33 @@ export function buildWorld(scene, seed = 1) {
   const upper = box(12, 2.6, 2.6, C.containerD, -8, 2.6 + 1.3, -2);
   group.add(upper);
   obstacleMeshes.push(upper);
+  // more container stacks: extra colour variety, extra lanes
+  addBox(12, 2.6, 2.6, C.containerE, -46, 14, 0.15);
+  addBox(12, 2.6, 2.6, C.containerF, 46, -26, -0.12);
+  addBox(6, 2.6, 2.6, C.containerE, 8, -40, 0.2);
+  addBox(12, 2.6, 2.6, C.containerF, -4, 46, -0.08);
+  addBox(6, 2.6, 2.6, C.containerB, 44, 14, 0.3);
+  const upper2 = box(6, 2.6, 2.6, C.containerA, 44, 2.6 + 1.3, 14);
+  upper2.rotation.y = 0.3;
+  group.add(upper2);
+  obstacleMeshes.push(upper2);
+  // barrel clusters: low round cover, scattered near the lanes
+  {
+    const barrelGeo = new THREE.CylinderGeometry(0.45, 0.45, 1.1, 10);
+    const barrelCols = [0x8a2f2f, 0x2a6e7a, 0x9a6a2a, 0x5a5a5a];
+    for (const [bx, bz] of [
+      [-20, 18], [-19, 19.2], [12, -22], [13.2, -21], [-36, 36],
+      [38, -2], [38.9, -1], [-8, 28], [24, 36], [-48, -20],
+    ]) {
+      const mat = new THREE.MeshStandardMaterial({ color: barrelCols[Math.floor(rng() * barrelCols.length)], roughness: 0.7, metalness: 0.4 });
+      const barrel = new THREE.Mesh(barrelGeo, mat);
+      barrel.position.set(bx, 0.55, bz);
+      barrel.castShadow = true;
+      group.add(barrel);
+      obstacleMeshes.push(barrel);
+      colliders.push({ minX: bx - 0.45, maxX: bx + 0.45, minZ: bz - 0.45, maxZ: bz + 0.45, height: 1.1 });
+    }
+  }
   // concrete barriers: low cover dotted through the middle
   for (const [x, z, ry] of [
     [-14, 8, 0.4],
@@ -264,6 +318,56 @@ export function buildWorld(scene, seed = 1) {
   group.add(platform);
   obstacleMeshes.push(platform);
   colliders.push({ minX: towerX - 3.2, maxX: towerX + 3.2, minZ: towerZ - 3.2, maxZ: towerZ + 3.2, height: 7 });
+  // second watchtower, south-east, mirroring the north one
+  const tower2X = 46;
+  const tower2Z = 44;
+  for (const [dx, dz] of [
+    [-2.4, -2.4],
+    [2.4, -2.4],
+    [-2.4, 2.4],
+    [2.4, 2.4],
+  ]) {
+    const leg = box(0.5, 7, 0.5, C.tower, tower2X + dx, 3.5, tower2Z + dz);
+    group.add(leg);
+    obstacleMeshes.push(leg);
+  }
+  const platform2 = box(6.4, 0.5, 6.4, C.tower, tower2X, 7.2, tower2Z);
+  group.add(platform2);
+  obstacleMeshes.push(platform2);
+  colliders.push({ minX: tower2X - 3.2, maxX: tower2X + 3.2, minZ: tower2Z - 3.2, maxZ: tower2Z + 3.2, height: 7 });
+  // gantry crane, north-west corner: mast, jib over the yard, counter-jib,
+  // hanging cable and hook block — the yard's tallest silhouette
+  {
+    const craneMat = new THREE.MeshStandardMaterial({ color: 0xb5502a, roughness: 0.7, metalness: 0.4 });
+    const craneDark = new THREE.MeshStandardMaterial({ color: 0x3a4048, roughness: 0.8 });
+    const mast = new THREE.Mesh(new THREE.BoxGeometry(1.8, 18, 1.8), craneMat);
+    mast.position.set(-44, 9, -40);
+    mast.castShadow = true;
+    group.add(mast);
+    obstacleMeshes.push(mast);
+    colliders.push({ minX: -44.9, maxX: -43.1, minZ: -40.9, maxZ: -39.1, height: 18 });
+    const jib = new THREE.Mesh(new THREE.BoxGeometry(26, 1, 1), craneDark);
+    jib.position.set(-31, 18, -40);
+    jib.castShadow = true;
+    group.add(jib);
+    obstacleMeshes.push(jib);
+    const counterJib = new THREE.Mesh(new THREE.BoxGeometry(8, 1, 1), craneDark);
+    counterJib.position.set(-48.5, 18, -40);
+    group.add(counterJib);
+    obstacleMeshes.push(counterJib);
+    const counterweight = new THREE.Mesh(new THREE.BoxGeometry(2, 2.4, 1.6), craneMat);
+    counterweight.position.set(-51.5, 16.6, -40);
+    group.add(counterweight);
+    obstacleMeshes.push(counterweight);
+    const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 7, 6), craneDark);
+    cable.position.set(-20, 14.5, -40);
+    group.add(cable);
+    const hook = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.6), craneMat);
+    hook.position.set(-20, 10.6, -40);
+    hook.castShadow = true;
+    group.add(hook);
+    obstacleMeshes.push(hook);
+  }
   // wrecked hauler: cab + flatbed, south lane
   addBox(2.4, 2.2, 2.2, 0x3a3f45, -16, 22, 0.5);
   addBox(6, 1.0, 2.2, 0x3a3f45, -12.5, 20.4, 0.5);
@@ -362,19 +466,118 @@ export function makeZoneVisual(scene) {
   const wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 16, 48, 1, true), wallMat);
   wall.position.y = 8;
   scene.add(wall);
+  // outer glow shell: a second, fainter cylinder that makes the wall read
+  // as a band of fire rather than a single sheet
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0xff4d00,
+    transparent: true,
+    opacity: 0.08,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const glow = new THREE.Mesh(new THREE.CylinderGeometry(1.03, 1.03, 16, 48, 1, true), glowMat);
+  glow.position.y = 8;
+  scene.add(glow);
   const ringMat = new THREE.MeshBasicMaterial({ color: PALETTE.zone, transparent: true, opacity: 0.55 });
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.97, 1, 64), ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 0.06;
   scene.add(ring);
   return {
-    update(cx, cz, radius) {
+    update(cx, cz, radius, time = 0) {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 3);
+      wallMat.opacity = 0.16 + 0.1 * pulse;
+      glowMat.opacity = 0.05 + 0.07 * pulse;
+      ringMat.opacity = 0.45 + 0.25 * pulse;
       wall.position.x = cx;
       wall.position.z = cz;
       wall.scale.set(radius, 1, radius);
+      glow.position.x = cx;
+      glow.position.z = cz;
+      glow.scale.set(radius, 1, radius);
       ring.position.x = cx;
       ring.position.z = cz;
       ring.scale.set(radius, radius, 1);
+    },
+  };
+}
+
+/**
+ * Ashfall: drifting ember motes across the yard (one THREE.Points cloud) plus
+ * a denser ring of motes hugging the zone wall, re-seated every frame.
+ */
+export function makeAshfall(scene) {
+  const COUNT = 500;
+  const positions = new Float32Array(COUNT * 3);
+  const speeds = new Float32Array(COUNT);
+  for (let i = 0; i < COUNT; i += 1) {
+    positions[i * 3] = (Math.random() - 0.5) * 130;
+    positions[i * 3 + 1] = Math.random() * 22;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 130;
+    speeds[i] = 0.4 + Math.random() * 0.9;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0xffa050,
+    size: 0.32,
+    transparent: true,
+    opacity: 0.75,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+
+  const WALL_COUNT = 220;
+  const wallPos = new Float32Array(WALL_COUNT * 3);
+  const wallAngle = new Float32Array(WALL_COUNT);
+  const wallH = new Float32Array(WALL_COUNT);
+  for (let i = 0; i < WALL_COUNT; i += 1) {
+    wallAngle[i] = Math.random() * Math.PI * 2;
+    wallH[i] = Math.random() * 14;
+  }
+  const wallGeo = new THREE.BufferGeometry();
+  wallGeo.setAttribute('position', new THREE.BufferAttribute(wallPos, 3));
+  const wallMat = new THREE.PointsMaterial({
+    color: 0xff7a2f,
+    size: 0.45,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const wallPoints = new THREE.Points(wallGeo, wallMat);
+  scene.add(wallPoints);
+
+  return {
+    points,
+    wallPoints,
+    count: COUNT + WALL_COUNT,
+    update(dt, time, zone) {
+      const arr = geo.attributes.position.array;
+      for (let i = 0; i < COUNT; i += 1) {
+        arr[i * 3 + 1] -= speeds[i] * dt;
+        arr[i * 3] += Math.sin(time * 0.7 + i) * dt * 0.6;
+        if (arr[i * 3 + 1] < 0) {
+          arr[i * 3 + 1] = 20 + Math.random() * 2;
+          arr[i * 3] = (Math.random() - 0.5) * 130;
+          arr[i * 3 + 2] = (Math.random() - 0.5) * 130;
+        }
+      }
+      geo.attributes.position.needsUpdate = true;
+      if (zone) {
+        const warr = wallGeo.attributes.position.array;
+        for (let i = 0; i < WALL_COUNT; i += 1) {
+          const a = wallAngle[i] + time * 0.05;
+          const r = zone.radius + (Math.random() - 0.5) * 3;
+          warr[i * 3] = zone.cx + Math.cos(a) * r;
+          warr[i * 3 + 1] = wallH[i] + Math.sin(time * 0.9 + i) * 0.5;
+          warr[i * 3 + 2] = zone.cz + Math.sin(a) * r;
+        }
+        wallGeo.attributes.position.needsUpdate = true;
+      }
     },
   };
 }

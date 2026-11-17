@@ -2,6 +2,7 @@
 // for every number the player sees, so the 3D loop never touches the DOM itself.
 import { MAP } from './config.js';
 import { input } from './input.js';
+import { nextRankBonus } from './ranks.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -10,6 +11,7 @@ let last = {};
 let minimapAt = 0;
 let toastAt = -99;
 let hitAt = -99;
+const dmgEls = new Map();
 
 export function initHud() {
   for (const id of [
@@ -17,7 +19,7 @@ export function initHud() {
     'weapon-slots', 'alive-num', 'zone-timer', 'zone-label', 'zone-hint', 'killfeed',
     'banner', 'banner-title', 'banner-sub', 'toast', 'prompt', 'crosshair', 'hitmarker',
     'damage-vignette', 'zone-vignette', 'minimap', 'ammo', 'overlay', 'overlay-title',
-    'overlay-copy', 'end-stats', 'play',
+    'overlay-copy', 'end-stats', 'play', 'ember-rank', 'dmgnums', 'best-place',
   ]) {
     els[id] = $(id);
   }
@@ -66,6 +68,16 @@ export function updateHud(match, now) {
     els['weapon-slots'].innerHTML = slots;
   }
   setText(els['alive-num'], String(match.aliveCount()));
+
+  // ember rank: current rank + the bonus the next rank grants
+  if (els['ember-rank']) {
+    const rank = p.emberRank || 0;
+    const next = nextRankBonus(rank);
+    setText(els['ember-rank'], rank > 0 ? `★ EMBER RANK ${rank} · NEXT: ${next.label}` : `EMBER RANK 0 · NEXT: ${next.label}`);
+  }
+
+  // floating damage numbers: project each recent hit to screen space
+  renderDamageNumbers(match, now);
 
   // zone timer + label
   const z = match.zone;
@@ -118,8 +130,9 @@ export function updateHud(match, now) {
     els.toast.classList.remove('on');
   }
 
-  // killfeed
+  // killfeed (kills + rank-up / drop notes)
   const feedHtml = match.feed.slice(-5).map((f) => {
+    if (f.note) return `<div class="feed-line note">${f.note}</div>`;
     const k = f.killer === 'You' ? '<b class="you">You</b>' : `<b>${f.killer}</b>`;
     const v = f.victim === 'You' ? '<b class="you">You</b>' : `<b>${f.victim}</b>`;
     const wname = f.weaponName ? ` <span style="color:#93a8ad">[${f.weaponName}]</span>` : '';
@@ -134,6 +147,77 @@ export function updateHud(match, now) {
   if (now - minimapAt > 0.1) {
     minimapAt = now;
     drawMinimap(match);
+  }
+}
+
+function renderDamageNumbers(match, now) {
+  const box = els.dmgnums;
+  if (!box || !match.camera) return;
+  const seen = new Set();
+  for (const d of match.damageNumbers) {
+    seen.add(d.id);
+    let el = dmgEls.get(d.id);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'dmgnum';
+      box.appendChild(el);
+      dmgEls.set(d.id, el);
+    }
+    el.textContent = `-${d.amount}`;
+    const age = now - d.at;
+    el.style.opacity = String(Math.max(0, 1 - age / 0.9));
+    el.dataset.x = String(d.x);
+    el.dataset.y = String(d.y);
+    el.dataset.z = String(d.z);
+    el.dataset.age = String(age);
+  }
+  for (const [id, el] of [...dmgEls]) {
+    if (!seen.has(id)) {
+      el.remove();
+      dmgEls.delete(id);
+    }
+  }
+  // position each number from its stored world coords
+  positionDamageNumbers(match);
+}
+
+function positionDamageNumbers(match) {
+  if (!match.camera) return;
+  const cam = match.camera;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  for (const [id, el] of dmgEls) {
+    const x = Number(el.dataset.x || 0);
+    const y = Number(el.dataset.y || 0);
+    const z = Number(el.dataset.z || 0);
+    const age = Number(el.dataset.age || 0);
+    // forward vector from yaw/pitch (camera rotation order YXZ)
+    const cy = Math.cos(cam.rotation.y);
+    const sy = Math.sin(cam.rotation.y);
+    const cp = Math.cos(cam.rotation.x);
+    const sp = Math.sin(cam.rotation.x);
+    const fx = -sy * cp;
+    const fy = sp;
+    const fz = -cy * cp;
+    const rx = cy;
+    const rz = -sy;
+    const dx = x - cam.position.x;
+    const dy = y - cam.position.y;
+    const dz = z - cam.position.z;
+    const depth = dx * fx + dy * fy + dz * fz;
+    if (depth < 0.5) {
+      el.style.display = 'none';
+      continue;
+    }
+    el.style.display = 'block';
+    const right = dx * rx + dz * rz;
+    // camera up for rotation order YXZ: (sin(pitch)*sin(yaw), cos(pitch), sin(pitch)*cos(yaw))
+    const up = dx * sp * sy + dy * cp + dz * sp * cy;
+    const f = (h / 2) / Math.tan((cam.fov * Math.PI / 180) / 2);
+    const sx = w / 2 + (right / depth) * f;
+    const sy2 = h / 2 - (up / depth) * f - age * 60;
+    el.style.left = `${sx.toFixed(1)}px`;
+    el.style.top = `${sy2.toFixed(1)}px`;
   }
 }
 
@@ -175,11 +259,11 @@ function drawMinimap(match) {
       g.setLineDash([]);
     }
   }
-  // loot dots
-  g.fillStyle = '#39d0c4';
+  // loot dots (supply drops read orange)
   for (const item of match.loot) {
     if (item.taken) continue;
-    g.fillRect(toX(item.x) - 1, toZ(item.z) - 1, 2, 2);
+    g.fillStyle = item.kind === 'supply' ? '#ffb703' : '#39d0c4';
+    g.fillRect(toX(item.x) - 1, toZ(item.z) - 1, item.kind === 'supply' ? 4 : 2, item.kind === 'supply' ? 4 : 2);
   }
   // player arrow
   const p = match.player;
@@ -198,16 +282,42 @@ function drawMinimap(match) {
   }
 }
 
+function bestPlacement() {
+  try {
+    const v = Number(window.localStorage.getItem('emberline-best-placement') || 0);
+    return v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordPlacement(place) {
+  try {
+    const best = bestPlacement();
+    if (best === null || place < best) window.localStorage.setItem('emberline-best-placement', String(place));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function showEndScreen(win, match) {
   const p = match.player;
+  const place = win ? 1 : match.placement;
+  recordPlacement(place);
+  const s = p.stats || { shots: 0, hits: 0, damage: 0 };
+  const acc = s.shots > 0 ? Math.round((s.hits / s.shots) * 100) : 0;
+  const survived = `${Math.floor(match.time / 60)}:${String(Math.floor(match.time % 60)).padStart(2, '0')}`;
   els['overlay-title'].innerHTML = win ? 'LAST DRIFTER <span class="ember">STANDING</span>' : 'SIGNAL LOST';
   els['overlay-copy'].innerHTML = win
     ? 'The ashfall takes the rest. The Reach is yours, Drifter.'
-    : `You placed <b>#${match.placement}</b> of 8. The Reach keeps what it takes.`;
+    : `You placed <b>#${place}</b> of 8. The Reach keeps what it takes.`;
   els['end-stats'].hidden = false;
   els['end-stats'].innerHTML =
-    `KILLS <b>${p.kills}</b> &nbsp;·&nbsp; SCORE <b>${(p.kills * 100 + (win ? 500 : 0)).toLocaleString('en-US')}</b>` +
-    ` &nbsp;·&nbsp; SURVIVED <b>${Math.floor(match.time / 60)}:${String(Math.floor(match.time % 60)).padStart(2, '0')}</b>`;
+    `KILLS <b>${p.kills}</b><br>` +
+    `DAMAGE DEALT <b>${Math.round(s.damage).toLocaleString('en-US')}</b><br>` +
+    `SHOTS <b>${s.shots}</b> &nbsp;·&nbsp; HITS <b>${s.hits}</b> &nbsp;·&nbsp; ACCURACY <b>${acc}%</b><br>` +
+    `SURVIVED <b>${survived}</b> &nbsp;·&nbsp; PLACEMENT <b>#${place}</b> of 8<br>` +
+    `EMBER RANK <b>${p.emberRank || 0}</b> &nbsp;·&nbsp; SCORE <b>${(p.kills * 100 + (win ? 500 : 0)).toLocaleString('en-US')}</b>`;
   els.play.textContent = 'Play again';
   els.overlay.hidden = false;
 }
@@ -219,4 +329,8 @@ export function showMenu() {
   els['end-stats'].hidden = true;
   els.play.textContent = 'Click to play';
   els.overlay.hidden = false;
+  if (els['best-place']) {
+    const best = bestPlacement();
+    els['best-place'].textContent = best ? `Best placement: #${best} of 8` : 'No matches played yet — good luck, Drifter.';
+  }
 }

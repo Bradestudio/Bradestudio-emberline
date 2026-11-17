@@ -8,7 +8,10 @@ import { collideCircle, segmentBlocked } from './world.js';
 import { WEAPONS, makeWeaponState, currentSpread, tickWeapon, tryFire, startReload } from './weapons.js';
 import { hitscan, applyDamage, spawnTracer } from './combat.js';
 
-const BOT_NAMES = ['Kestrel', 'Bram', 'Sable', 'Ivo', 'Mira', 'Doss', 'Wren'];
+// Callsigns: short ember names, shown in the kill feed and on the floating
+// nameplates above each bot, so every rival reads as a character, not a drone.
+export const BOT_CALLSIGNS = ['ASH', 'CINDER', 'SLAG', 'RUST', 'FLINT', 'SMOKE', 'EMBER'];
+const BOT_NAMES = BOT_CALLSIGNS;
 const LOADOUTS = ['rifle', 'shotgun', 'marksman', 'rifle', 'shotgun', 'rifle', 'marksman'];
 
 export function makeBot(index, x, z) {
@@ -249,9 +252,10 @@ export function updateBot(bot, dt, now, api) {
     }
   }
 
-  // --- pick up loot on contact ---
+  // --- pick up loot on contact (supply drops are for the player only) ---
   for (const item of loot) {
     if (item.taken) continue;
+    if (item.kind === 'supply') continue;
     const d = Math.hypot(item.x - bot.pos.x, item.z - bot.pos.z);
     if (d < 1.6) {
       item.taken = true;

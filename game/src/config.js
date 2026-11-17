@@ -14,6 +14,8 @@ export const PALETTE = {
   containerB: 0x2a6e7a,
   containerC: 0x7a7a3a,
   containerD: 0x8a2f2f,
+  containerE: 0x3a6e4a,
+  containerF: 0x9a6a2a,
   concrete: 0x8d8578,
   crate: 0x9a7a4a,
   tower: 0x4a4440,
@@ -68,3 +70,19 @@ export const COMBAT = {
 };
 
 export const STEP = 1 / 60;
+
+// Ember ranks: progression for the player. One rank per elimination and one
+// per zone phase survived. Bonuses rotate deterministically by rank number,
+// so the same rank always gives the same bonus (testable, no RNG).
+export const RANK_BONUSES = [
+  { id: 'vitality', label: 'MAX HP +15 · HEAL 15' },
+  { id: 'reload', label: 'RELOAD +12%' },
+  { id: 'swift', label: 'MOVE SPEED +10%' },
+  { id: 'plating', label: 'ARMOR +25' },
+  { id: 'fury', label: 'DAMAGE +15%' },
+];
+
+export const SUPPLY_DROP = {
+  firstAt: 40, // seconds into the match
+  every: 50, // seconds between drops after the first
+};

@@ -3,9 +3,10 @@
 // shrinks in phases, and the last one alive wins. This file owns the match state,
 // the player, the zone, the loot, the kill feed and the win/lose call.
 import * as THREE from 'three';
-import { MAP, PLAYER, ZONE, STEP } from './config.js';
+import { MAP, PLAYER, ZONE, STEP, SUPPLY_DROP } from './config.js';
+import { applyRankBonus, nextRankBonus } from './ranks.js';
 import { WEAPONS, makeWeaponState, currentSpread, tickWeapon, tryFire, startReload } from './weapons.js';
-import { buildWorld, makeZoneVisual, collideCircle } from './world.js';
+import { buildWorld, makeZoneVisual, makeAshfall, collideCircle } from './world.js';
 import { makeBotBody, hitscan, applyDamage, spawnTracer, tickTracer, removeTracer } from './combat.js';
 import { makeBot, updateBot } from './bots.js';
 import { input, wasPressed } from './input.js';
@@ -80,6 +81,7 @@ export class Match {
     this.seed = seed;
     this.world = buildWorld(scene, seed);
     this.zoneVisual = makeZoneVisual(scene);
+    this.ashfall = makeAshfall(scene);
     this.rng = (() => {
       let a = (seed * 2654435761) >>> 0;
       return () => {
@@ -99,6 +101,11 @@ export class Match {
     this.playerHitFlash = 0;
     this.playerHealFlash = 0;
     this.zoneWarned = false;
+    this.bursts = [];
+    this.damageNumbers = [];
+    this.damageSeq = 0;
+    this.shake = 0;
+    this.dropTimer = SUPPLY_DROP.firstAt;
     this.fighters = [];
     this.loot = [];
     this.zone = null;
@@ -130,9 +137,15 @@ export class Match {
         yaw: 0,
         pitch: 0,
         health: 100,
+        maxHealth: 100,
         armor: 0,
         alive: true,
         kills: 0,
+        emberRank: 0,
+        reloadMult: 1,
+        speedMult: 1,
+        damageMult: 1,
+        stats: { shots: 0, hits: 0, damage: 0 },
         weapons: { pistol: makeWeaponState(WEAPONS.pistol) },
         current: 'pistol',
         slots: ['pistol'],
@@ -144,7 +157,7 @@ export class Match {
       return f;
     }
     const bot = makeBot(index, x, z);
-    bot.body = makeBotBody(this.scene, index);
+    bot.body = makeBotBody(this.scene, index, bot.name);
     for (const part of bot.body.parts) part.userData.fighter = bot;
     return bot;
   }
@@ -158,6 +171,11 @@ export class Match {
     for (const item of this.loot) this.scene.remove(item.mesh);
     for (const t of this.tracers) removeTracer(this.scene, t);
     this.tracers = [];
+    for (const b of this.bursts) this.removeBurst(b);
+    this.bursts = [];
+    this.damageNumbers = [];
+    this.shake = 0;
+    this.dropTimer = SUPPLY_DROP.firstAt;
     this.feed = [];
     this.time = 0;
     this.placement = 0;
@@ -195,7 +213,121 @@ export class Match {
       announced: false,
     };
     this.phase = 'playing';
-    this.pushBanner('DROP IN', 'Loot up — the ashfall closes in 20 seconds');
+    this.pushBanner('DROP IN', 'Last drifter standing wins — first ashfall closes in 22s. Loot up now.');
+    audio.zoneWarn();
+  }
+
+  // ---- ember ranks ----
+  /** Grant the player one rank: apply its bonus, toast it, log it in the feed. */
+  grantEmberRank(reason) {
+    const p = this.player;
+    if (!p || !p.alive) return null;
+    p.emberRank += 1;
+    const bonus = applyRankBonus(p, p.emberRank);
+    const next = nextRankBonus(p.emberRank);
+    this.toast(`EMBER RANK ${p.emberRank} — ${bonus.label} (next: ${next.label})`);
+    this.pushNote(`★ EMBER RANK ${p.emberRank} — ${bonus.label} (${reason})`);
+    return bonus;
+  }
+
+  /** A feed line that is a note, not a kill (rank-ups, drops). */
+  pushNote(text) {
+    this.feed.push({ note: text, at: this.time });
+    if (this.feed.length > 6) this.feed.shift();
+  }
+
+  /** An ember-burst particle explosion at `pos` (world Vector3). */
+  spawnBurst(pos, color = 0xff7a2f, count = 26) {
+    const positions = new Float32Array(count * 3);
+    const vels = [];
+    for (let i = 0; i < count; i += 1) {
+      positions[i * 3] = pos.x;
+      positions[i * 3 + 1] = pos.y + 1;
+      positions[i * 3 + 2] = pos.z;
+      const a = Math.random() * Math.PI * 2;
+      const up = Math.random() * 4 + 1;
+      const out = Math.random() * 3.5 + 0.5;
+      vels.push(new THREE.Vector3(Math.cos(a) * out, up, Math.sin(a) * out));
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color,
+      size: 0.28,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const points = new THREE.Points(geo, mat);
+    this.scene.add(points);
+    const burst = { points, geo, mat, vels, life: 0.7, maxLife: 0.7 };
+    this.bursts.push(burst);
+    return burst;
+  }
+
+  removeBurst(burst) {
+    this.scene.remove(burst.points);
+    burst.geo.dispose();
+    burst.mat.dispose();
+  }
+
+  tickBursts(dt) {
+    for (let i = this.bursts.length - 1; i >= 0; i -= 1) {
+      const b = this.bursts[i];
+      b.life -= dt;
+      const arr = b.geo.attributes.position.array;
+      for (let j = 0; j < b.vels.length; j += 1) {
+        const v = b.vels[j];
+        v.y -= 9 * dt;
+        arr[j * 3] += v.x * dt;
+        arr[j * 3 + 1] += v.y * dt;
+        arr[j * 3 + 2] += v.z * dt;
+        if (arr[j * 3 + 1] < 0.05) arr[j * 3 + 1] = 0.05;
+      }
+      b.geo.attributes.position.needsUpdate = true;
+      b.mat.opacity = Math.max(0, b.life / b.maxLife);
+      if (b.life <= 0) {
+        this.removeBurst(b);
+        this.bursts.splice(i, 1);
+      }
+    }
+    // floating damage numbers fade out after 0.9s
+    for (let i = this.damageNumbers.length - 1; i >= 0; i -= 1) {
+      if (this.time - this.damageNumbers[i].at > 0.9) this.damageNumbers.splice(i, 1);
+    }
+  }
+
+  /** Spawn a supply-drop crate with a light-pillar beacon inside the zone. */
+  spawnSupplyDrop() {
+    const z = this.zone;
+    if (!z) return;
+    const a = this.rng() * Math.PI * 2;
+    const r = this.rng() * z.radius * 0.6;
+    const x = Math.max(-55, Math.min(55, z.cx + Math.cos(a) * r));
+    const zz = Math.max(-55, Math.min(55, z.cz + Math.sin(a) * r));
+    const group = new THREE.Group();
+    const crate = new THREE.Mesh(
+      new THREE.BoxGeometry(1.1, 0.8, 1.1),
+      new THREE.MeshStandardMaterial({ color: 0xffb703, roughness: 0.5, metalness: 0.3 }),
+    );
+    crate.position.y = 0.4;
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(1.14, 0.18, 1.14),
+      new THREE.MeshBasicMaterial({ color: 0xff4d00 }),
+    );
+    stripe.position.y = 0.4;
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.9, 30, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xffb703, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }),
+    );
+    beam.position.y = 15;
+    group.add(crate, stripe, beam);
+    group.position.set(x, 0.55, zz);
+    this.scene.add(group);
+    this.loot.push({ kind: 'supply', x, z: zz, mesh: group, taken: false, phase: this.rng() * Math.PI * 2, supply: true });
+    this.pushBanner('SUPPLY DROP', 'A crate fell inside the zone — follow the light pillar');
+    this.pushNote('⬇ SUPPLY DROP inbound — follow the light pillar');
     audio.zoneWarn();
   }
 
@@ -235,6 +367,8 @@ export class Match {
       if (z.timer <= 0) {
         z.radius = def.radius;
         z.phase += 1;
+        // surviving a phase earns the player an ember rank
+        if (this.player && this.player.alive) this.grantEmberRank('survived the ashfall');
         if (z.phase < ZONE.phases.length) {
           z.state = 'wait';
           z.timer = ZONE.phases[z.phase].wait;
@@ -243,7 +377,7 @@ export class Match {
         }
       }
     }
-    this.zoneVisual.update(z.cx, z.cz, z.radius);
+    this.zoneVisual.update(z.cx, z.cz, z.radius, this.time);
   }
 
   zoneDamage(dt) {
@@ -261,6 +395,7 @@ export class Match {
           const died = applyDamage(f, z.dps);
           if (f.isPlayer) {
             this.playerHitFlash = 1;
+            this.shake = Math.min(1, this.shake + 0.4);
             audio.hurt();
           }
           if (died) this.onFighterDown(f, null, 'the ashfall');
@@ -271,6 +406,7 @@ export class Match {
 
   onFighterDown(victim, killer, weaponName) {
     this.pushFeed(killer ? killer.name : '—', victim.name, weaponName || '');
+    this.spawnBurst(victim.pos, victim.isPlayer ? 0x39d0c4 : 0xff7a2f);
     if (victim.isPlayer) {
       this.placement = this.aliveCount() + 1;
       this.phase = 'dead';
@@ -300,11 +436,18 @@ export class Match {
     const sens = input.ads ? 0.0013 : 0.0023;
     p.yaw -= input.lookDX * sens;
     p.pitch -= input.lookDY * sens;
+    // arrow-key look fallback: playable with no pointer lock at all
+    const turnRate = 2.4;
+    const pitchRate = 1.9;
+    if (input.arrowLeft) p.yaw += turnRate * dt;
+    if (input.arrowRight) p.yaw -= turnRate * dt;
+    if (input.arrowUp) p.pitch += pitchRate * dt;
+    if (input.arrowDown) p.pitch -= pitchRate * dt;
     p.pitch = Math.max(-1.5, Math.min(1.5, p.pitch));
 
     // move
     const sprinting = input.sprint && input.forward && !input.ads;
-    const speed = sprinting ? PLAYER.sprintSpeed : PLAYER.walkSpeed;
+    const speed = (sprinting ? PLAYER.sprintSpeed : PLAYER.walkSpeed) * (p.speedMult || 1);
     const penalty = w.def.movePenalty * (input.ads ? 1.5 : 1);
     const wish = new THREE.Vector3(
       (input.right ? 1 : 0) - (input.left ? 1 : 0),
@@ -364,7 +507,7 @@ export class Match {
     }
 
     // reload
-    if (wasPressed('r') && startReload(w)) audio.reload();
+    if (wasPressed('r') && startReload(w, p.reloadMult || 1)) audio.reload();
 
     // fire
     const moving = sp > 1;
@@ -376,7 +519,7 @@ export class Match {
         this.firePlayerShot(w, moving);
       } else if (w.mag === 0 && w.reloading <= 0) {
         audio.dryFire();
-        if (startReload(w)) audio.reload();
+        if (startReload(w, p.reloadMult || 1)) audio.reload();
       }
     }
     if (!input.fire) w.triggerReady = true;
@@ -416,10 +559,21 @@ export class Match {
       const end = hit ? hit.point : origin.clone().addScaledVector(dir, w.def.range);
       const tracer = spawnTracer(this.scene, origin.clone().addScaledVector(dir, 0.6), end);
       this.tracers.push(tracer);
+      p.stats.shots += 1;
       if (hit && hit.fighter && hit.fighter !== p) {
         const mult = hit.part === 'head' ? w.def.headMult : 1;
         const falloff = Math.max(0.45, 1 - hit.distance / (w.def.range * 1.6));
-        const dmg = w.def.damage * mult * falloff;
+        const dmg = w.def.damage * mult * falloff * (p.damageMult || 1);
+        p.stats.hits += 1;
+        p.stats.damage += dmg;
+        this.damageNumbers.push({
+          id: this.damageSeq += 1,
+          x: hit.point.x,
+          y: hit.point.y,
+          z: hit.point.z,
+          amount: Math.round(dmg),
+          at: this.time,
+        });
         const died = applyDamage(hit.fighter, dmg);
         this.lastHitAt = this.time;
         this.lastHitKill = died;
@@ -428,6 +582,10 @@ export class Match {
           p.kills += 1;
           audio.kill();
           this.pushFeed(p.name, hit.fighter.name, w.def.name);
+          const left = this.aliveCount();
+          this.pushBanner(`ELIMINATED ${hit.fighter.name}`, `${p.kills} ${p.kills === 1 ? 'kill' : 'kills'} — ${left} ${left === 1 ? 'drifter' : 'drifters'} left`);
+          this.spawnBurst(hit.fighter.pos, 0xff7a2f);
+          this.grantEmberRank(`eliminated ${hit.fighter.name}`);
           if (this.aliveCount() === 1 && p.alive) {
             this.phase = 'victory';
             audio.victory();
@@ -437,32 +595,47 @@ export class Match {
     }
   }
 
+  /** Give fighter `p` the weapon `kind` (new slot, or ammo if already owned). */
+  giveWeapon(p, kind) {
+    if (p.weapons[kind]) {
+      p.weapons[kind].reserve = Math.min(p.weapons[kind].def.reserveMax, p.weapons[kind].reserve + 60);
+      this.toast(`+60 ${WEAPONS[kind].name} ammo`);
+    } else if (p.slots.length < 4) {
+      p.weapons[kind] = makeWeaponState(WEAPONS[kind]);
+      p.slots.push(kind);
+      p.current = kind;
+      this.switchTimer = 0.35;
+      this.toast(`Picked up ${WEAPONS[kind].name}`);
+    } else {
+      // full: swap the current gun out
+      const old = p.current;
+      delete p.weapons[old];
+      p.slots[p.slots.indexOf(old)] = kind;
+      p.weapons[kind] = makeWeaponState(WEAPONS[kind]);
+      p.current = kind;
+      this.switchTimer = 0.35;
+      this.toast(`Swapped to ${WEAPONS[kind].name}`);
+    }
+    audio.pickup();
+  }
+
   takeLoot(p, item) {
     item.taken = true;
     item.mesh.visible = false;
+    if (item.kind === 'supply') {
+      // supply drop: a random high-tier weapon plus armour
+      const kinds = ['rifle', 'shotgun', 'marksman'];
+      const kind = kinds[Math.floor(this.rng() * kinds.length)];
+      this.giveWeapon(p, kind);
+      p.armor = Math.min(PLAYER.armorMax, p.armor + 50);
+      this.toast(`SUPPLY DROP: ${WEAPONS[kind].name} + 50 armour`);
+      audio.armor();
+      return;
+    }
     if (item.kind === 'rifle' || item.kind === 'shotgun' || item.kind === 'marksman') {
-      if (p.weapons[item.kind]) {
-        p.weapons[item.kind].reserve = Math.min(p.weapons[item.kind].def.reserveMax, p.weapons[item.kind].reserve + 60);
-        this.toast(`+60 ${WEAPONS[item.kind].name} ammo`);
-      } else if (p.slots.length < 4) {
-        p.weapons[item.kind] = makeWeaponState(WEAPONS[item.kind]);
-        p.slots.push(item.kind);
-        p.current = item.kind;
-        this.switchTimer = 0.35;
-        this.toast(`Picked up ${WEAPONS[item.kind].name}`);
-      } else {
-        // full: swap the current gun out
-        const old = p.current;
-        delete p.weapons[old];
-        p.slots[p.slots.indexOf(old)] = item.kind;
-        p.weapons[item.kind] = makeWeaponState(WEAPONS[item.kind]);
-        p.current = item.kind;
-        this.switchTimer = 0.35;
-        this.toast(`Swapped to ${WEAPONS[item.kind].name}`);
-      }
-      audio.pickup();
+      this.giveWeapon(p, item.kind);
     } else if (item.kind === 'medkit') {
-      p.health = Math.min(100, p.health + 50);
+      p.health = Math.min(p.maxHealth || 100, p.health + 50);
       this.playerHealFlash = 1;
       this.toast('+50 health');
       audio.heal();
@@ -507,6 +680,7 @@ export class Match {
       obstacleMeshes: this.world.obstacleMeshes,
       onKill: (killer, victim, weaponName) => {
         this.pushFeed(killer.name, victim.name, weaponName);
+        this.spawnBurst(victim.pos, victim.isPlayer ? 0x39d0c4 : 0xff7a2f);
         if (victim.isPlayer) {
           this.placement = this.aliveCount() + 1;
           this.phase = 'dead';
@@ -523,6 +697,7 @@ export class Match {
       },
       onPlayerHit: () => {
         this.playerHitFlash = 1;
+        this.shake = Math.min(1, this.shake + 0.55);
         audio.hurt();
       },
       onPickup: () => {},
@@ -534,6 +709,16 @@ export class Match {
       if (!f.isPlayer) updateBot(f, dt, nowSeconds, api);
     }
     this.zoneDamage(dt);
+    // supply drops on a timer while the match runs
+    this.dropTimer -= dt;
+    if (this.dropTimer <= 0) {
+      this.dropTimer = SUPPLY_DROP.every;
+      this.spawnSupplyDrop();
+    }
+    // ashfall drift + wall motes, bursts, shake decay
+    if (this.ashfall) this.ashfall.update(dt, this.time, this.zone);
+    this.tickBursts(dt);
+    this.shake = Math.max(0, this.shake - dt * 2.2);
     // safety net: whatever felled the last rival, the match ends
     if (this.phase === 'playing' && this.aliveCount() === 1 && this.player.alive) {
       this.phase = 'victory';
@@ -561,11 +746,15 @@ export class Match {
     const cam = this.camera;
     if (!cam || !p) return;
     const bob = Math.hypot(p.vel.x, p.vel.z) > 0.5 && p.onGround ? Math.sin(this.time * 11) * 0.03 : 0;
-    cam.position.set(p.pos.x, p.pos.y + PLAYER.eye + bob, p.pos.z);
+    // screen shake: a small random offset that decays after taking damage
+    const sh = this.shake * 0.07;
+    const shX = sh ? (Math.random() - 0.5) * 2 * sh : 0;
+    const shY = sh ? (Math.random() - 0.5) * 2 * sh : 0;
+    cam.position.set(p.pos.x + shX, p.pos.y + PLAYER.eye + bob + shY, p.pos.z);
     cam.rotation.order = 'YXZ';
     cam.rotation.y = p.yaw;
     cam.rotation.x = p.pitch;
-    cam.rotation.z = 0;
+    cam.rotation.z = this.shake ? (Math.random() - 0.5) * this.shake * 0.02 : 0;
     const w = this.playerWeapon();
     const targetFov = input.ads ? PLAYER.adsFov / (w ? w.def.zoom : 1) : PLAYER.hipFov;
     cam.fov += (targetFov - cam.fov) * 0.18;

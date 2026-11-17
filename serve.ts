@@ -1,4 +1,4 @@
-// LUMEN DRIFT — a tiny static server for game/ (Node 22, standard library only).
+// EMBERLINE — a tiny static server for game/ (Node 22, standard library only).
 // `node serve.ts` serves game/ on http://localhost:8080 so the game can be played
 // in desktop Chrome with no build step. Development convenience only.
 import { createReadStream, statSync } from 'node:fs';

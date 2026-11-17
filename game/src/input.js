@@ -12,6 +12,12 @@ export const input = {
   ads: false, // held (right button)
   reload: false,
   interact: false,
+  // arrow-key look fallback: held arrows turn/pitch the view, so the game is
+  // playable without pointer lock. WASD moves; arrows never move.
+  arrowLeft: false,
+  arrowRight: false,
+  arrowUp: false,
+  arrowDown: false,
   slots: [false, false, false, false], // 1..4 pressed this frame
   lookDX: 0,
   lookDY: 0,
@@ -27,14 +33,18 @@ function keyName(event) {
 }
 
 function refresh() {
-  input.forward = KEYS.has('w') || KEYS.has('arrowup');
-  input.back = KEYS.has('s') || KEYS.has('arrowdown');
-  input.left = KEYS.has('a') || KEYS.has('arrowleft');
-  input.right = KEYS.has('d') || KEYS.has('arrowright');
+  input.forward = KEYS.has('w');
+  input.back = KEYS.has('s');
+  input.left = KEYS.has('a');
+  input.right = KEYS.has('d');
   input.sprint = KEYS.has('shift');
   input.jump = KEYS.has(' ');
   input.reload = KEYS.has('r');
   input.interact = KEYS.has('e');
+  input.arrowLeft = KEYS.has('arrowleft');
+  input.arrowRight = KEYS.has('arrowright');
+  input.arrowUp = KEYS.has('arrowup');
+  input.arrowDown = KEYS.has('arrowdown');
 }
 
 export function bindInput(canvas) {
